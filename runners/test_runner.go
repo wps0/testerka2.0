@@ -35,9 +35,11 @@ type TestRunner interface {
 }
 
 type TestStore interface {
-	Get(id string) (*TestData, error)
+	Get(id string) (TestData, error)
 	Insert(id string, data TestData) error
 	Remove(id string) error
+	Size() uint64
+	Exists(id string) bool
 }
 
 type TestResult struct {
