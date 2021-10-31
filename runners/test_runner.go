@@ -2,11 +2,14 @@ package runners
 
 import "regexp"
 
-type TestRunnerConfiguration struct {
+type TestRunnerConfig struct {
 	InputDataDir string
 	OutputDataDir string
 	// This regex applied to the filename uniquely identifies a test
 	TestIdRegexp regexp.Regexp
+
+	SolutionPath string
+	TimeMeasurementBinPath string
 }
 
 type TestData struct {
@@ -24,12 +27,12 @@ type TestReport struct {
 }
 
 type TestRunner interface {
-	Init(cfg TestRunnerConfiguration)
+	Init(cfg TestRunnerConfig)
 
-	TestReader(store *TestStore)
-	TestDealer(store *TestStore)
+	TestReader()
+	TestDealer()
 
-	ReadTest() TestData
+	ReadTest(inputPath string, outputPath string)
 	RunTest(test *TestData)
 	CheckResult(data *TestData, report *TestReport) TestResult
 }

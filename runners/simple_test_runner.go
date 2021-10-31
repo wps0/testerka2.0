@@ -2,6 +2,10 @@ package runners
 
 import (
 	"errors"
+	"io/ioutil"
+	"log"
+	"math"
+	"runtime"
 	"sync"
 )
 
@@ -63,23 +67,88 @@ func (store *InMemoryTestStore) Size() uint64 {
 }
 
 
+type SimpleTestRunnerConfig struct {
+	TestRunnerConfig
+	ConcurrentRunnersAmount uint
+	ConcurrentReadersAmount uint
+	MaxStoreSize uint64
+}
+
 type SimpleTestRunner struct {
 	Store InMemoryTestStore
+	Config SimpleTestRunnerConfig
+
+	Finished chan TestResult
+	TestSizeChange chan bool
+	Quit chan bool
+	ReaderQuit chan TestData
 }
 
-func (runner *SimpleTestRunner) Init(cfg TestRunnerConfiguration) {
+func (runner *SimpleTestRunner) Init(cfg TestRunnerConfig) {
+	runner.Config = SimpleTestRunnerConfig{
+		TestRunnerConfig:        cfg,
+		ConcurrentRunnersAmount: uint(math.Max(float64(runtime.NumCPU()-1), 1)),
+		ConcurrentReadersAmount: 1,
+		// 64 MB
+		MaxStoreSize: 64*1024*1024,
+	}
+	runner.Finished = make(chan TestResult, runner.Config.ConcurrentRunnersAmount)
+	runner.Quit = make(chan bool)
+	runner.ReaderQuit = make(chan TestData, runner.Config.ConcurrentReadersAmount)
+}
+
+func (runner *SimpleTestRunner) TestReader() {
+	inputFiles, err := ioutil.ReadDir(runner.Config.InputDataDir)
+	if err != nil {
+		log.Fatalf("Cannot read the input data direcory! Error: %v\n", err)
+	}
+	outputFiles, err := ioutil.ReadDir(runner.Config.OutputDataDir)
+	if err != nil {
+		log.Fatalf("Cannot read the output data direcory! Error: %v\n", err)
+	}
+
+	// id -> output file
+	var idOutputMap = make(map[string]string)
+	for _, output := range outputFiles {
+		if output.IsDir() {
+			continue
+		}
+
+		id := runner.Config.TestIdRegexp.Find([]byte(output.Name()))
+		if id == nil {
+			log.Printf("Invalid path: %s\n", output.Name())
+		}
+		idOutputMap[string(id)] = output.Name()
+	}
+
+	//readersAmount := uint(0)
+	for _, input := range inputFiles {
+		id := string(runner.Config.TestIdRegexp.Find([]byte(input.Name())))
+		val, exists := idOutputMap[id]
+		if !exists {
+			log.Printf("Output file not found. Test path: %s\n", input.Name())
+		}
+
+		//if readersAmount < runner.Config.ConcurrentReadersAmount {
+		//	// co to to input name??
+		//	go runner.ReadTest(input.Name(), val)
+		//	readersAmount++
+		//	continue
+		//}
+
+		select {
+
+		}
+	}
+
+}
+
+func (runner *SimpleTestRunner) TestDealer() {
 	panic("implement me")
 }
 
-func (runner *SimpleTestRunner) TestReader(store *TestStore) {
-	panic("implement me")
-}
-
-func (runner *SimpleTestRunner) TestDealer(store *TestStore) {
-	panic("implement me")
-}
-
-func (runner *SimpleTestRunner) ReadTest() TestData {
+func (runner *SimpleTestRunner) ReadTest(inputPath string, outputPath string) {
+	
 	panic("implement me")
 }
 
