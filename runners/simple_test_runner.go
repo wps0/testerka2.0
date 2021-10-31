@@ -1,28 +1,30 @@
 package runners
 
-type SimpleTestRunner struct{}
+type SimpleTestRunner struct {
 
-func (SimpleTestRunner) Init(cfg TestRunnerConfiguration) {
+}
+
+func (runner *SimpleTestRunner) Init(cfg TestRunnerConfiguration) {
 	panic("implement me")
 }
 
-func (SimpleTestRunner) TestReader() {
+func (runner *SimpleTestRunner) TestReader(store *TestStore) {
 	panic("implement me")
 }
 
-func (SimpleTestRunner) TestDealer() {
+func (runner *SimpleTestRunner) TestDealer(store *TestStore) {
 	panic("implement me")
 }
 
-func (SimpleTestRunner) ReadTest() TestConfiguration {
+func (runner *SimpleTestRunner) ReadTest() TestData {
 	panic("implement me")
 }
 
-func (SimpleTestRunner) RunTest(test TestConfiguration) {
+func (runner *SimpleTestRunner) RunTest(test *TestData) {
 	panic("implement me")
 }
 
-func (SimpleTestRunner) CheckResult(report TestReport) TestResult {
+func (runner *SimpleTestRunner) CheckResult(data *TestData, report *TestReport) TestResult {
 	panic("implement me")
 }
 

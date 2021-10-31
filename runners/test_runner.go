@@ -9,7 +9,7 @@ type TestRunnerConfiguration struct {
 	TestIdRegexp regexp.Regexp
 }
 
-type TestConfiguration struct {
+type TestData struct {
 	InputData []byte
 	ExpectedOutput []byte
 }
@@ -26,12 +26,18 @@ type TestReport struct {
 type TestRunner interface {
 	Init(cfg TestRunnerConfiguration)
 
-	TestReader()
-	TestDealer()
+	TestReader(store *TestStore)
+	TestDealer(store *TestStore)
 
-	ReadTest() TestConfiguration
-	RunTest(test TestConfiguration)
-	CheckResult(report TestReport) TestResult
+	ReadTest() TestData
+	RunTest(test *TestData)
+	CheckResult(data *TestData, report *TestReport) TestResult
+}
+
+type TestStore interface {
+	Get(id string) (*TestData, error)
+	Insert(id string, data TestData) error
+	Remove(id string) error
 }
 
 type TestResult struct {
