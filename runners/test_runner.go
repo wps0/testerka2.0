@@ -17,6 +17,11 @@ type TestData struct {
 	ExpectedOutput []byte
 }
 
+type TestLocation struct {
+	InputFilePath string
+	OutputFilePath string
+}
+
 type TestReport struct {
 	// in ms
 	Time uint
@@ -32,7 +37,7 @@ type TestRunner interface {
 	TestReader()
 	TestDealer()
 
-	ReadTest(inputPath string, outputPath string)
+	ReadTest(test TestLocation) TestData
 	RunTest(test *TestData)
 	CheckResult(data *TestData, report *TestReport) TestResult
 }
