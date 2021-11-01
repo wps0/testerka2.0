@@ -30,7 +30,7 @@ func main() {
 		InputDataDir:           "C:\\Users\\admin\\Downloads\\ezt2\\in",
 		OutputDataDir:          "C:\\Users\\admin\\Downloads\\ezt2\\out",
 		TestIdRegexp:           *regex,
-		SolutionPath:           "",
+		SolutionPath:           "C:\\Users\\admin\\Desktop\\fsfs.exe",
 		TimeMeasurementBinPath: "",
 	}
 	runner.Init(config)

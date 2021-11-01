@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"runtime"
 	"sync"
-	"unicode"
 )
 
 type InMemoryTestStore struct {
@@ -218,7 +217,7 @@ func (runner *SimpleTestRunner) TestReader() {
 				runner.ReadyTests <- "CLOSE-QUIT-CHANNEL"
 				return
 			}
-			log.Printf("Reading test %s\n", rq.TestId)
+			//log.Printf("Reading test %s\n", rq.TestId)
 			testData := runner.ReadTest(rq.TestLocation)
 
 			if runner.Config.MaxStoreSize < runner.Store.Size() {
@@ -353,18 +352,17 @@ func (runner *SimpleTestRunner) CheckResult(data *TestData, report *TestReport) 
 	var trimmedExp []byte
 	var trimmedReal []byte
 	for i := len(data.ExpectedOutput)-1; i >= 0; i-- {
-		if !unicode.IsSpace(rune(data.ExpectedOutput[i])) {
-			trimmedExp = data.ExpectedOutput[:i]
+		if report.Output[i] != '\n' && report.Output[i] != ' ' && report.Output[i] != '\r' {
+			trimmedExp = data.ExpectedOutput[:i+1]
 			break
 		}
 	}
 	for i := len(report.Output)-1; i >= 0; i-- {
-		if !unicode.IsSpace(rune(report.Output[i])) {
-			trimmedReal = report.Output[:i]
+		if report.Output[i] != '\n' && report.Output[i] != ' ' && report.Output[i] != '\r' {
+			trimmedReal = report.Output[:i+1]
 			break
 		}
 	}
-
 	if bytes.Compare(trimmedExp, trimmedReal) == 0 {
 		return TestResult{
 			Status:  true,
