@@ -29,16 +29,17 @@ type TestReport struct {
 	MaxMemory uint
 	Output []byte
 	ExitCode int
+	Message string
 }
 
 type TestRunner interface {
 	Init(cfg TestRunnerConfig)
 
 	TestReader()
-	TestDealer()
+	TestRunner()
 
 	ReadTest(test TestLocation) TestData
-	RunTest(test *TestData)
+	RunTest(test *TestData) TestReport
 	CheckResult(data *TestData, report *TestReport) TestResult
 }
 
