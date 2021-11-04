@@ -177,7 +177,7 @@ func (runner *SimpleTestRunner) ReadersSupervisor()  {
 			continue
 		}
 
-		id := runner.Config.TestIdRegexp.Find([]byte(output.Name()))
+		id := runner.Config.TestIdRegexpInternal.Find([]byte(output.Name()))
 		if id == nil {
 			log.Printf("Invalid path: %s\n", output.Name())
 		}
@@ -185,7 +185,7 @@ func (runner *SimpleTestRunner) ReadersSupervisor()  {
 	}
 
 	for _, input := range inputFiles {
-		id := string(runner.Config.TestIdRegexp.Find([]byte(input.Name())))
+		id := string(runner.Config.TestIdRegexpInternal.Find([]byte(input.Name())))
 		outputPath, exists := idOutputMap[id]
 		if !exists {
 			log.Printf("Output file not found. Input path: %s\n", input.Name())
@@ -351,8 +351,15 @@ func (runner *SimpleTestRunner) RunTest(test *TestData) TestReport {
 func (runner *SimpleTestRunner) CheckResult(data *TestData, report *TestReport) TestResult {
 	var trimmedExp []byte
 	var trimmedReal []byte
+	if report.ExitCode == -1 {
+		return TestResult{
+			Status: false,
+			Message: "WA: " + report.Message,
+		}
+	}
+
 	for i := len(data.ExpectedOutput)-1; i >= 0; i-- {
-		if report.Output[i] != '\n' && report.Output[i] != ' ' && report.Output[i] != '\r' {
+		if data.ExpectedOutput[i] != '\n' && data.ExpectedOutput[i] != ' ' && data.ExpectedOutput[i] != '\r' {
 			trimmedExp = data.ExpectedOutput[:i+1]
 			break
 		}

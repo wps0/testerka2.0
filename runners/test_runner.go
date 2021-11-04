@@ -6,7 +6,8 @@ type TestRunnerConfig struct {
 	InputDataDir string
 	OutputDataDir string
 	// This regex applied to the filename uniquely identifies a test
-	TestIdRegexp regexp.Regexp
+	TestIdRegexpInternal regexp.Regexp `json:"-"`
+	TestIdRegexp string
 
 	SolutionPath string
 	TimeMeasurementBinPath string
