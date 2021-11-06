@@ -21,12 +21,11 @@ import (
 // wybor test runnera
 // odpalenie testow na test runnerze
 
-
 var configPath string
 var defaultConfig = runners.TestRunnerConfig{
 	InputDataDir:           "C:\\Users\\admin\\Downloads\\ezt2\\in",
 	OutputDataDir:          "C:\\Users\\admin\\Downloads\\ezt2\\out",
-	TestIdRegexp: "([0-9]+)\\.",
+	TestIdRegexp:           "([0-9]+)\\.",
 	SolutionPath:           "C:\\Users\\admin\\Desktop\\fsfs.exe",
 	TimeMeasurementBinPath: "",
 }
@@ -74,4 +73,5 @@ func main() {
 	log.Printf("Waiting for the tests to finish...")
 	runner.WaitGroup.Wait()
 	log.Printf("Finished!")
+	log.Printf("WAs: %d, OK: %d", runner.GetStats().WACount, runner.GetStats().OKCount)
 }

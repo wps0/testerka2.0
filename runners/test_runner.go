@@ -3,23 +3,23 @@ package runners
 import "regexp"
 
 type TestRunnerConfig struct {
-	InputDataDir string
+	InputDataDir  string
 	OutputDataDir string
 	// This regex applied to the filename uniquely identifies a test
 	TestIdRegexpInternal regexp.Regexp `json:"-"`
-	TestIdRegexp string
+	TestIdRegexp         string
 
-	SolutionPath string
+	SolutionPath           string
 	TimeMeasurementBinPath string
 }
 
 type TestData struct {
-	InputData []byte
+	InputData      []byte
 	ExpectedOutput []byte
 }
 
 type TestLocation struct {
-	InputFilePath string
+	InputFilePath  string
 	OutputFilePath string
 }
 
@@ -28,9 +28,14 @@ type TestReport struct {
 	Time uint
 	// in kBs
 	MaxMemory uint
-	Output []byte
-	ExitCode int
-	Message string
+	Output    []byte
+	ExitCode  int
+	Message   string
+}
+
+type TestStats struct {
+	WACount int
+	OKCount int
 }
 
 type TestRunner interface {
@@ -38,6 +43,8 @@ type TestRunner interface {
 
 	TestReader()
 	TestRunner()
+
+	GetStats() TestStats
 
 	ReadTest(test TestLocation) TestData
 	RunTest(test *TestData) TestReport
@@ -53,6 +60,6 @@ type TestStore interface {
 }
 
 type TestResult struct {
-	Status bool
+	Status  bool
 	Message string
 }

@@ -15,8 +15,8 @@ import (
 type InMemoryTestStore struct {
 	Tests map[string]TestData
 	// in bytes
-	TestsSize uint64
-	Mux sync.RWMutex
+	TestsSize    uint64
+	Mux          sync.RWMutex
 	OnSizeChange func()
 }
 
@@ -91,12 +91,11 @@ func (store *InMemoryTestStore) PopRandom() (string, TestData) {
 	return "", TestData{}
 }
 
-
 type SimpleTestRunnerConfig struct {
 	TestRunnerConfig
 	ConcurrentRunnersAmount uint
 	ConcurrentReadersAmount uint
-	MaxStoreSize uint64
+	MaxStoreSize            uint64
 }
 
 type ReadRequest struct {
@@ -105,30 +104,39 @@ type ReadRequest struct {
 }
 
 type SimpleTestRunner struct {
-	Store InMemoryTestStore
-	Config SimpleTestRunnerConfig
+	Store     InMemoryTestStore
+	Config    SimpleTestRunnerConfig
 	WaitGroup sync.WaitGroup
 
-
+	Stats    TestStats
+	StatsMux sync.RWMutex
 
 	ReadRequests chan ReadRequest
-	ReadyTests chan string
+	ReadyTests   chan string
 
-	Finished chan TestResult
+	Finished       chan TestResult
 	TestSizeChange chan bool
-	Quit chan bool
+	Quit           chan bool
+}
+
+func (runner *SimpleTestRunner) GetStats() TestStats {
+	runner.StatsMux.RLock()
+	defer runner.StatsMux.RUnlock()
+	return runner.Stats
 }
 
 func (runner *SimpleTestRunner) Init(cfg TestRunnerConfig) {
 	runner.TestSizeChange = make(chan bool)
 	runner.Quit = make(chan bool)
 
+	cpuCount := runtime.NumCPU()
+
 	runner.Config = SimpleTestRunnerConfig{
 		TestRunnerConfig:        cfg,
-		ConcurrentRunnersAmount: uint(math.Max(float64(runtime.NumCPU()-1), 1)),
-		ConcurrentReadersAmount: 1,
-		// 64 MB
-		MaxStoreSize: 64*1024*1024,
+		ConcurrentRunnersAmount: uint(math.Max(float64(cpuCount)-1, 1)) + 5,
+		ConcurrentReadersAmount: uint(math.Floor(float64(cpuCount) * 1.25)),
+		// 256 MB
+		MaxStoreSize: 256 * 1024 * 1024,
 	}
 	runner.Store = InMemoryTestStore{
 		Tests:     make(map[string]TestData),
@@ -158,18 +166,21 @@ func (runner *SimpleTestRunner) InitReaders() {
 	}
 }
 
-func (runner *SimpleTestRunner) ReadersSupervisor()  {
+func (runner *SimpleTestRunner) ReadersSupervisor() {
 	defer runner.WaitGroup.Done()
 
+	log.Println("Reading the input directory...")
 	inputFiles, err := ioutil.ReadDir(runner.Config.InputDataDir)
 	if err != nil {
 		log.Fatalf("Cannot read the input data direcory! Error: %v\n", err)
 	}
+	log.Println("Reading the output directory...")
 	outputFiles, err := ioutil.ReadDir(runner.Config.OutputDataDir)
 	if err != nil {
 		log.Fatalf("Cannot read the output data direcory! Error: %v\n", err)
 	}
 
+	log.Println("Assigning each output file a unique id...")
 	// id -> output file
 	var idOutputMap = make(map[string]string)
 	for _, output := range outputFiles {
@@ -184,6 +195,7 @@ func (runner *SimpleTestRunner) ReadersSupervisor()  {
 		idOutputMap[string(id)] = runner.Config.OutputDataDir + string(os.PathSeparator) + output.Name()
 	}
 
+	log.Println("Preparing the input files to be read...")
 	for _, input := range inputFiles {
 		id := string(runner.Config.TestIdRegexpInternal.Find([]byte(input.Name())))
 		outputPath, exists := idOutputMap[id]
@@ -208,7 +220,7 @@ func (runner *SimpleTestRunner) TestReader() {
 	defer runner.WaitGroup.Done()
 	for {
 		select {
-		case rq, ok := <- runner.ReadRequests:
+		case rq, ok := <-runner.ReadRequests:
 			if !ok {
 				return
 			}
@@ -223,11 +235,11 @@ func (runner *SimpleTestRunner) TestReader() {
 			if runner.Config.MaxStoreSize < runner.Store.Size() {
 				for {
 					select {
-					case <- runner.TestSizeChange:
+					case <-runner.TestSizeChange:
 						if runner.Config.MaxStoreSize < runner.Store.Size() {
 							break
 						}
-					case <- runner.Quit:
+					case <-runner.Quit:
 						log.Printf("Test reader is quitting...")
 						return
 					}
@@ -240,7 +252,7 @@ func (runner *SimpleTestRunner) TestReader() {
 			} else {
 				runner.ReadyTests <- rq.TestId
 			}
-		case <- runner.Quit:
+		case <-runner.Quit:
 			log.Printf("Test reader is quitting...")
 			return
 		}
@@ -259,7 +271,7 @@ func (runner *SimpleTestRunner) TestRunner() {
 	defer runner.WaitGroup.Done()
 	for {
 		select {
-		case testId, ok := <- runner.ReadyTests:
+		case testId, ok := <-runner.ReadyTests:
 			if !ok {
 				return
 			}
@@ -277,9 +289,24 @@ func (runner *SimpleTestRunner) TestRunner() {
 
 			report := runner.RunTest(&test)
 			result := runner.CheckResult(&test, &report)
-			log.Printf("Test %s  --  %d  %s\n", testId, report.Time, result.Message)
 
-		case <- runner.Quit:
+			if result.Status {
+				cnt := 0
+				runner.StatsMux.Lock()
+				runner.Stats.OKCount++
+				cnt = runner.Stats.OKCount + runner.Stats.WACount
+				runner.StatsMux.Unlock()
+				if cnt%10000 == 0 {
+					log.Printf("Status: %d / ?", cnt)
+				}
+			} else {
+				runner.StatsMux.Lock()
+				stats := runner.Stats
+				runner.Stats.WACount++
+				runner.StatsMux.Unlock()
+				log.Printf("Test %s (OK: %d, WAs: %d) --  %d  %s\n", testId, stats.OKCount, stats.WACount, report.Time, result.Message)
+			}
+		case <-runner.Quit:
 			return
 		}
 	}
@@ -330,10 +357,10 @@ func (runner *SimpleTestRunner) ReadTest(test TestLocation) TestData {
 
 func (runner *SimpleTestRunner) RunTest(test *TestData) TestReport {
 	data := TestReport{
-		Time: 0,
-		Message: "OK",
+		Time:      0,
+		Message:   "OK",
 		MaxMemory: 0,
-		ExitCode: 0,
+		ExitCode:  0,
 	}
 	cmd := exec.Command(runner.Config.SolutionPath)
 	cmd.Stdin = bytes.NewReader(test.InputData)
@@ -341,7 +368,7 @@ func (runner *SimpleTestRunner) RunTest(test *TestData) TestReport {
 	if err != nil {
 		return TestReport{
 			ExitCode: -1,
-			Message: err.Error(),
+			Message:  err.Error(),
 		}
 	}
 	data.Output = out
@@ -353,18 +380,18 @@ func (runner *SimpleTestRunner) CheckResult(data *TestData, report *TestReport) 
 	var trimmedReal []byte
 	if report.ExitCode == -1 {
 		return TestResult{
-			Status: false,
+			Status:  false,
 			Message: "WA: " + report.Message,
 		}
 	}
 
-	for i := len(data.ExpectedOutput)-1; i >= 0; i-- {
+	for i := len(data.ExpectedOutput) - 1; i >= 0; i-- {
 		if data.ExpectedOutput[i] != '\n' && data.ExpectedOutput[i] != ' ' && data.ExpectedOutput[i] != '\r' {
 			trimmedExp = data.ExpectedOutput[:i+1]
 			break
 		}
 	}
-	for i := len(report.Output)-1; i >= 0; i-- {
+	for i := len(report.Output) - 1; i >= 0; i-- {
 		if report.Output[i] != '\n' && report.Output[i] != ' ' && report.Output[i] != '\r' {
 			trimmedReal = report.Output[:i+1]
 			break
@@ -381,4 +408,3 @@ func (runner *SimpleTestRunner) CheckResult(data *TestData, report *TestReport) 
 		Message: "WA",
 	}
 }
-
