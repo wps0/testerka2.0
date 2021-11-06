@@ -20,6 +20,11 @@ type InMemoryTestStore struct {
 	OnSizeChange func()
 }
 
+type Test struct {
+	Id   string
+	Data TestData
+}
+
 func (store *InMemoryTestStore) Get(id string) (TestData, error) {
 	store.Mux.RLock()
 	defer store.Mux.RUnlock()
@@ -74,28 +79,11 @@ func (store *InMemoryTestStore) Size() uint64 {
 	return store.TestsSize
 }
 
-func (store *InMemoryTestStore) PopRandom() (string, TestData) {
-	store.Mux.RLock()
-	if len(store.Tests) != 0 {
-		for ix, data := range store.Tests {
-			store.Mux.RUnlock()
-			err := store.Remove(ix)
-			if err != nil {
-				log.Printf("Cannot pop random an element. Error: %v\n", err)
-				return "", TestData{}
-			}
-			return ix, data
-		}
-	}
-	store.Mux.RUnlock()
-	return "", TestData{}
-}
-
 type SimpleTestRunnerConfig struct {
 	TestRunnerConfig
 	ConcurrentRunnersAmount uint
 	ConcurrentReadersAmount uint
-	MaxStoreSize            uint64
+	MaxTestCache            uint64
 }
 
 type ReadRequest struct {
@@ -104,7 +92,7 @@ type ReadRequest struct {
 }
 
 type SimpleTestRunner struct {
-	Store     InMemoryTestStore
+	//Store     InMemoryTestStore
 	Config    SimpleTestRunnerConfig
 	WaitGroup sync.WaitGroup
 
@@ -112,7 +100,7 @@ type SimpleTestRunner struct {
 	StatsMux sync.RWMutex
 
 	ReadRequests chan ReadRequest
-	ReadyTests   chan string
+	ReadyTests   chan Test
 
 	Finished       chan TestResult
 	TestSizeChange chan bool
@@ -133,23 +121,13 @@ func (runner *SimpleTestRunner) Init(cfg TestRunnerConfig) {
 
 	runner.Config = SimpleTestRunnerConfig{
 		TestRunnerConfig:        cfg,
-		ConcurrentRunnersAmount: uint(math.Max(float64(cpuCount)-1, 1)) + 5,
-		ConcurrentReadersAmount: uint(math.Floor(float64(cpuCount) * 1.25)),
-		// 256 MB
-		MaxStoreSize: 256 * 1024 * 1024,
-	}
-	runner.Store = InMemoryTestStore{
-		Tests:     make(map[string]TestData),
-		TestsSize: 0,
-		Mux:       sync.RWMutex{},
-		OnSizeChange: func() {
-			runner.TestSizeChange <- true
-			log.Printf("new size: %d\n", runner.Store.Size())
-		},
+		ConcurrentRunnersAmount: uint(math.Max(float64(cpuCount)-1, 1) * 1.25),
+		ConcurrentReadersAmount: uint(math.Floor(float64(cpuCount) * 1.15)),
+		MaxTestCache:            1024,
 	}
 
 	runner.ReadRequests = make(chan ReadRequest, runner.Config.ConcurrentReadersAmount)
-	runner.ReadyTests = make(chan string, runner.Config.MaxStoreSize)
+	runner.ReadyTests = make(chan Test, runner.Config.MaxTestCache)
 
 	runner.InitReaders()
 	runner.WaitGroup.Add(1)
@@ -169,13 +147,8 @@ func (runner *SimpleTestRunner) InitReaders() {
 func (runner *SimpleTestRunner) ReadersSupervisor() {
 	defer runner.WaitGroup.Done()
 
-	log.Println("Reading the input directory...")
-	inputFiles, err := ioutil.ReadDir(runner.Config.InputDataDir)
-	if err != nil {
-		log.Fatalf("Cannot read the input data direcory! Error: %v\n", err)
-	}
 	log.Println("Reading the output directory...")
-	outputFiles, err := ioutil.ReadDir(runner.Config.OutputDataDir)
+	outputFiles, err := ioutil.ReadDir(runner.Config.OutputData)
 	if err != nil {
 		log.Fatalf("Cannot read the output data direcory! Error: %v\n", err)
 	}
@@ -192,11 +165,21 @@ func (runner *SimpleTestRunner) ReadersSupervisor() {
 		if id == nil {
 			log.Printf("Invalid path: %s\n", output.Name())
 		}
-		idOutputMap[string(id)] = runner.Config.OutputDataDir + string(os.PathSeparator) + output.Name()
+		idOutputMap[string(id)] = runner.Config.OutputData + string(os.PathSeparator) + output.Name()
+	}
+
+	log.Println("Reading the input directory...")
+	inputFiles, err := ioutil.ReadDir(runner.Config.InputData)
+	if err != nil {
+		log.Fatalf("Cannot read the input data direcory! Error: %v\n", err)
 	}
 
 	log.Println("Preparing the input files to be read...")
-	for _, input := range inputFiles {
+	log.Printf("Skipping first %d tests...", runner.Config.SkipFirstN)
+	for i, input := range inputFiles {
+		if i < int(runner.Config.SkipFirstN) {
+			continue
+		}
 		id := string(runner.Config.TestIdRegexpInternal.Find([]byte(input.Name())))
 		outputPath, exists := idOutputMap[id]
 		if !exists {
@@ -207,7 +190,7 @@ func (runner *SimpleTestRunner) ReadersSupervisor() {
 		runner.ReadRequests <- ReadRequest{
 			TestId: id,
 			TestLocation: TestLocation{
-				InputFilePath:  runner.Config.InputDataDir + string(os.PathSeparator) + input.Name(),
+				InputFilePath:  runner.Config.InputData + string(os.PathSeparator) + input.Name(),
 				OutputFilePath: outputPath,
 			},
 		}
@@ -226,31 +209,14 @@ func (runner *SimpleTestRunner) TestReader() {
 			}
 			if rq.TestId == "FORWARD-CLOSE-QUIT-CHANNEL" {
 				close(runner.ReadRequests)
-				runner.ReadyTests <- "CLOSE-QUIT-CHANNEL"
+				runner.ReadyTests <- Test{Id: "CLOSE-QUIT-CHANNEL"}
 				return
 			}
-			//log.Printf("Reading test %s\n", rq.TestId)
+
 			testData := runner.ReadTest(rq.TestLocation)
-
-			if runner.Config.MaxStoreSize < runner.Store.Size() {
-				for {
-					select {
-					case <-runner.TestSizeChange:
-						if runner.Config.MaxStoreSize < runner.Store.Size() {
-							break
-						}
-					case <-runner.Quit:
-						log.Printf("Test reader is quitting...")
-						return
-					}
-				}
-			}
-
-			err := runner.Store.Insert(rq.TestId, testData)
-			if err != nil {
-				log.Printf("Failed to insert test to store. Error: %v\n", err)
-			} else {
-				runner.ReadyTests <- rq.TestId
+			runner.ReadyTests <- Test{
+				Id:   rq.TestId,
+				Data: testData,
 			}
 		case <-runner.Quit:
 			log.Printf("Test reader is quitting...")
@@ -271,24 +237,18 @@ func (runner *SimpleTestRunner) TestRunner() {
 	defer runner.WaitGroup.Done()
 	for {
 		select {
-		case testId, ok := <-runner.ReadyTests:
+		case test, ok := <-runner.ReadyTests:
 			if !ok {
 				return
 			}
-			if testId == "CLOSE-QUIT-CHANNEL" {
+			if test.Id == "CLOSE-QUIT-CHANNEL" {
 				close(runner.ReadyTests)
 				close(runner.Quit)
 				return
 			}
-			test, err := runner.Store.Get(testId)
-			if err != nil {
-				log.Println(err)
-				continue
-			}
-			runner.Store.Remove(testId)
 
-			report := runner.RunTest(&test)
-			result := runner.CheckResult(&test, &report)
+			report := runner.RunTest(&test.Data)
+			result := runner.CheckResult(&test.Data, &report)
 
 			if result.Status {
 				cnt := 0
@@ -304,7 +264,7 @@ func (runner *SimpleTestRunner) TestRunner() {
 				stats := runner.Stats
 				runner.Stats.WACount++
 				runner.StatsMux.Unlock()
-				log.Printf("Test %s (OK: %d, WAs: %d) --  %d  %s\n", testId, stats.OKCount, stats.WACount, report.Time, result.Message)
+				log.Printf("Test %s (OK: %d, WAs: %d) --  %d  %s\n", test.Id, stats.OKCount, stats.WACount, report.Time, result.Message)
 			}
 		case <-runner.Quit:
 			return

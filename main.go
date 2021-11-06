@@ -23,8 +23,8 @@ import (
 
 var configPath string
 var defaultConfig = runners.TestRunnerConfig{
-	InputDataDir:           "C:\\Users\\admin\\Downloads\\ezt2\\in",
-	OutputDataDir:          "C:\\Users\\admin\\Downloads\\ezt2\\out",
+	InputData:              "C:\\Users\\admin\\Downloads\\ezt2\\in",
+	OutputData:             "C:\\Users\\admin\\Downloads\\ezt2\\out",
 	TestIdRegexp:           "([0-9]+)\\.",
 	SolutionPath:           "C:\\Users\\admin\\Desktop\\fsfs.exe",
 	TimeMeasurementBinPath: "",

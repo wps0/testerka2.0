@@ -3,14 +3,16 @@ package runners
 import "regexp"
 
 type TestRunnerConfig struct {
-	InputDataDir  string
-	OutputDataDir string
+	InputData  string
+	OutputData string
 	// This regex applied to the filename uniquely identifies a test
 	TestIdRegexpInternal regexp.Regexp `json:"-"`
 	TestIdRegexp         string
 
 	SolutionPath           string
 	TimeMeasurementBinPath string
+
+	SkipFirstN uint
 }
 
 type TestData struct {
