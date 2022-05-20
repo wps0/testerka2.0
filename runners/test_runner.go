@@ -1,6 +1,9 @@
 package runners
 
-import "regexp"
+import (
+	"regexp"
+	"sync"
+)
 
 type TestRunnerConfig struct {
 	InputData  string
@@ -13,6 +16,9 @@ type TestRunnerConfig struct {
 	TimeMeasurementBinPath string
 
 	SkipFirstN uint
+
+	RunnerType         string
+	TypeSpecificConfig interface{}
 }
 
 type TestData struct {
@@ -47,6 +53,7 @@ type TestRunner interface {
 	TestRunner()
 
 	GetStats() TestStats
+	GetWaitGroup() *sync.WaitGroup
 
 	ReadTest(test TestLocation) TestData
 	RunTest(test *TestData) TestReport

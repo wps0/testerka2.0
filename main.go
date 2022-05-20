@@ -28,6 +28,7 @@ var defaultConfig = runners.TestRunnerConfig{
 	TestIdRegexp:           "([0-9]+)\\.",
 	SolutionPath:           "C:\\Users\\admin\\Desktop\\fsfs.exe",
 	TimeMeasurementBinPath: "",
+	RunnerType:             "simple",
 }
 
 func InitConfig(configType interface{}) interface{} {
@@ -68,10 +69,17 @@ func main() {
 		log.Fatalln(err)
 	}
 	config.TestIdRegexpInternal = *regex
-	runner := runners.SimpleTestRunner{}
+	var runner runners.TestRunner
+	if config.RunnerType == "simple" {
+		runner = &runners.SimpleTestRunner{}
+	} else if config.RunnerType == "xor" {
+		runner = &runners.XorTestRunner{}
+	} else {
+		panic("unknown runner type. possible values: 'simple', 'xor'")
+	}
 	runner.Init(config)
 	log.Printf("Waiting for the tests to finish...")
-	runner.WaitGroup.Wait()
+
+	runner.GetWaitGroup().Wait()
 	log.Printf("Finished!")
-	log.Printf("WAs: %d, OK: %d", runner.GetStats().WACount, runner.GetStats().OKCount)
 }

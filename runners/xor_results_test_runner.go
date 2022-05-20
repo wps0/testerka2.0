@@ -2,12 +2,12 @@ package runners
 
 import (
 	"bytes"
-	"encoding/binary"
 	"log"
 	"math"
 	"os/exec"
 	"runtime"
 	"sort"
+	"strconv"
 	"sync"
 )
 
@@ -16,20 +16,21 @@ type XORedResult struct {
 	Xor    uint64
 }
 
-type SingleFileTestRunnerConfig struct {
-	TestRunnerConfig
+type XorTestRunnerSpecificConfig struct {
 	ConcurrentRunnersAmount uint
-	PrintingModulo          uint
+	PrintingModulo          uint64
 	XorDefaultValue         uint
 	UpToN                   int64
 }
 
-type SingleFileTestRunner struct {
-	Config    SingleFileTestRunnerConfig
-	WaitGroup sync.WaitGroup
+type XorTestRunnerConfig struct {
+	GenericConfig  TestRunnerConfig
+	SpecificConfig XorTestRunnerSpecificConfig
+}
 
-	Stats    TestStats
-	StatsMux sync.RWMutex
+type XorTestRunner struct {
+	Config    XorTestRunnerConfig
+	WaitGroup sync.WaitGroup
 
 	TestRequests chan int64
 	Results      chan XORedResult
@@ -37,51 +38,56 @@ type SingleFileTestRunner struct {
 	Quit chan bool
 }
 
-func (runner *SingleFileTestRunner) GetStats() TestStats {
-	runner.StatsMux.RLock()
-	defer runner.StatsMux.RUnlock()
-	return runner.Stats
+func (runner *XorTestRunner) GetStats() TestStats {
+	panic("stub method")
 }
 
-func (runner *SingleFileTestRunner) Init(cfg TestRunnerConfig) {
+func (runner *XorTestRunner) GetWaitGroup() *sync.WaitGroup {
+	return &runner.WaitGroup
+}
+
+func (runner *XorTestRunner) Init(cfg TestRunnerConfig) {
 	runner.Quit = make(chan bool)
 	cpuCount := runtime.NumCPU()
-	runner.Config = SingleFileTestRunnerConfig{
-		TestRunnerConfig:        cfg,
-		ConcurrentRunnersAmount: uint(math.Max(float64(cpuCount)*1.25, 1)),
-		PrintingModulo:          100000,
-		XorDefaultValue:         0,
-		UpToN:                   1000000000,
+	runner.Config = XorTestRunnerConfig{
+		GenericConfig: cfg,
+		SpecificConfig: XorTestRunnerSpecificConfig{
+			ConcurrentRunnersAmount: uint(math.Max(float64(cpuCount)*0.5, 1)),
+			PrintingModulo:          10,
+			XorDefaultValue:         0,
+			UpToN:                   1000000000,
+		},
 	}
-	runner.TestRequests = make(chan int64, runner.Config.ConcurrentRunnersAmount*2)
-	runner.Results = make(chan XORedResult, runner.Config.ConcurrentRunnersAmount*1)
+	runner.TestRequests = make(chan int64, runner.Config.SpecificConfig.ConcurrentRunnersAmount*2)
+	runner.Results = make(chan XORedResult, runner.Config.SpecificConfig.ConcurrentRunnersAmount*1)
 	runner.InitTestRunners()
+
+	runner.WaitGroup.Add(2)
 	go runner.TestRequestsSupplier()
 	go runner.TestResultsCombiner()
 }
 
-func (runner *SingleFileTestRunner) TestRequestsSupplier() {
-	runner.WaitGroup.Add(1)
+func (runner *XorTestRunner) TestRequestsSupplier() {
 	defer runner.WaitGroup.Done()
-	for i := int64(runner.Config.SkipFirstN) + 1; i <= runner.Config.UpToN; i += 1000 {
+	for i := int64(0) + 1; i <= runner.Config.SpecificConfig.UpToN; i += 1000 {
 		runner.TestRequests <- i
+		log.Println(i)
 	}
 	runner.TestRequests <- -1
 }
 
-func (runner *SingleFileTestRunner) TestReader() {
+func (runner *XorTestRunner) TestReader() {
 	panic("stub method")
 }
 
-func (runner *SingleFileTestRunner) InitTestRunners() {
-	log.Printf("Running %d test runners...\n", runner.Config.ConcurrentRunnersAmount)
-	for i := uint(0); i < runner.Config.ConcurrentRunnersAmount; i++ {
+func (runner *XorTestRunner) InitTestRunners() {
+	log.Printf("Running %d test runners...\n", runner.Config.SpecificConfig.ConcurrentRunnersAmount)
+	for i := uint(0); i < runner.Config.SpecificConfig.ConcurrentRunnersAmount; i++ {
 		go runner.TestRunner()
 	}
 }
 
-func (runner *SingleFileTestRunner) TestResultsCombiner() {
-	runner.WaitGroup.Add(1)
+func (runner *XorTestRunner) TestResultsCombiner() {
 	defer runner.WaitGroup.Done()
 	cache := map[int64]uint64{}
 	fullXor := uint64(0)
@@ -90,6 +96,7 @@ func (runner *SingleFileTestRunner) TestResultsCombiner() {
 		select {
 		case res := <-runner.Results:
 			cache[res.StartN] = res.Xor
+			log.Printf("start=%d; nextStartN=%d", res.StartN, nextStartN)
 			if _, exists := cache[nextStartN]; exists {
 				keys := make([]int64, 0, len(cache))
 				for key, _ := range cache {
@@ -102,22 +109,28 @@ func (runner *SingleFileTestRunner) TestResultsCombiner() {
 					}
 					fullXor ^= cache[key]
 					delete(cache, key)
+
+					//if (nextStartN-1) % int64(runner.Config.SpecificConfig.PrintingModulo) == 0 {
+					log.Printf("...%d  xor  = %d\n", nextStartN-1, fullXor)
+					//}
 					nextStartN += 1000
 				}
 			}
 		case <-runner.Quit:
+			log.Printf("xor up to %d = %d", nextStartN-1000, fullXor)
 			return
 		}
 	}
 }
 
-func (runner *SingleFileTestRunner) TestRunner() {
+func (runner *XorTestRunner) TestRunner() {
 	runner.WaitGroup.Add(1)
 	defer runner.WaitGroup.Done()
 	for {
 		select {
 		case startI, ok := <-runner.TestRequests:
 			if !ok {
+				log.Println("test runners channel not ok")
 				return
 			}
 			if startI == -1 {
@@ -128,10 +141,17 @@ func (runner *SingleFileTestRunner) TestRunner() {
 
 			xor := uint64(0)
 			for i := startI; i < startI+1000; i++ {
-				inData := make([]byte, 8)
-				binary.LittleEndian.PutUint64(inData, uint64(i))
-				report := runner.RunTest(&TestData{InputData: inData})
-				xor ^= binary.LittleEndian.Uint64(report.Output)
+				input := strconv.FormatInt(i, 10)
+				report := runner.RunTest(&TestData{InputData: []byte(input)})
+				output := WhitespaceTrimRight(string(report.Output))
+				inted, err := strconv.ParseUint(output, 10, 64)
+				if err != nil {
+					if output != "NIE" {
+						log.Printf("cannot convert string '%s' to int; i = %d; error: %v", output, i, err)
+					}
+					continue
+				}
+				xor ^= inted
 			}
 			runner.Results <- XORedResult{
 				StartN: startI,
@@ -143,18 +163,18 @@ func (runner *SingleFileTestRunner) TestRunner() {
 	}
 }
 
-func (runner *SingleFileTestRunner) ReadTest(test TestLocation) TestData {
+func (runner *XorTestRunner) ReadTest(test TestLocation) TestData {
 	panic("stub method")
 }
 
-func (runner *SingleFileTestRunner) RunTest(test *TestData) TestReport {
+func (runner *XorTestRunner) RunTest(test *TestData) TestReport {
 	data := TestReport{
 		Time:      0,
 		Message:   "OK",
 		MaxMemory: 0,
 		ExitCode:  0,
 	}
-	cmd := exec.Command(runner.Config.SolutionPath)
+	cmd := exec.Command(runner.Config.GenericConfig.SolutionPath)
 	cmd.Stdin = bytes.NewReader(test.InputData)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -167,6 +187,6 @@ func (runner *SingleFileTestRunner) RunTest(test *TestData) TestReport {
 	return data
 }
 
-func (runner *SingleFileTestRunner) CheckResult(data *TestData, report *TestReport) TestResult {
+func (runner *XorTestRunner) CheckResult(data *TestData, report *TestReport) TestResult {
 	panic("stub method")
 }

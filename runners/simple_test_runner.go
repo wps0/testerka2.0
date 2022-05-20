@@ -79,11 +79,15 @@ func (store *InMemoryTestStore) Size() uint64 {
 	return store.TestsSize
 }
 
-type SimpleTestRunnerConfig struct {
-	TestRunnerConfig
+type SimpleTestRunnerSpecificConfig struct {
 	ConcurrentRunnersAmount uint
 	ConcurrentReadersAmount uint
 	MaxTestCache            uint64
+}
+
+type SimpleTestRunnerConfig struct {
+	GenericConfig      TestRunnerConfig
+	TypeSpecificConfig SimpleTestRunnerSpecificConfig
 }
 
 type ReadRequest struct {
@@ -107,6 +111,10 @@ type SimpleTestRunner struct {
 	Quit           chan bool
 }
 
+func (runner *SimpleTestRunner) GetWaitGroup() *sync.WaitGroup {
+	return &runner.WaitGroup
+}
+
 func (runner *SimpleTestRunner) GetStats() TestStats {
 	runner.StatsMux.RLock()
 	defer runner.StatsMux.RUnlock()
@@ -120,26 +128,28 @@ func (runner *SimpleTestRunner) Init(cfg TestRunnerConfig) {
 	cpuCount := runtime.NumCPU()
 
 	runner.Config = SimpleTestRunnerConfig{
-		TestRunnerConfig:        cfg,
-		ConcurrentRunnersAmount: uint(math.Max(float64(cpuCount)-1, 1) * 1.25),
-		ConcurrentReadersAmount: uint(math.Floor(float64(cpuCount) * 1.15)),
-		MaxTestCache:            1024,
+		GenericConfig: cfg,
+		TypeSpecificConfig: SimpleTestRunnerSpecificConfig{
+			ConcurrentRunnersAmount: uint(math.Max(float64(cpuCount)-1, 1) * 1.25),
+			ConcurrentReadersAmount: uint(math.Floor(float64(cpuCount) * 1.15)),
+			MaxTestCache:            1024,
+		},
 	}
 
-	runner.ReadRequests = make(chan ReadRequest, runner.Config.ConcurrentReadersAmount)
-	runner.ReadyTests = make(chan Test, runner.Config.MaxTestCache)
+	runner.ReadRequests = make(chan ReadRequest, runner.Config.TypeSpecificConfig.ConcurrentReadersAmount)
+	runner.ReadyTests = make(chan Test, runner.Config.TypeSpecificConfig.MaxTestCache)
 
 	runner.InitReaders()
 	runner.WaitGroup.Add(1)
 	go runner.ReadersSupervisor()
 	runner.InitTestRunners()
 
-	runner.Finished = make(chan TestResult, runner.Config.ConcurrentRunnersAmount)
+	runner.Finished = make(chan TestResult, runner.Config.TypeSpecificConfig.ConcurrentRunnersAmount)
 }
 
 func (runner *SimpleTestRunner) InitReaders() {
-	log.Printf("Running %d readers...\n", runner.Config.ConcurrentReadersAmount)
-	for i := uint(0); i < runner.Config.ConcurrentReadersAmount; i++ {
+	log.Printf("Running %d readers...\n", runner.Config.TypeSpecificConfig.ConcurrentReadersAmount)
+	for i := uint(0); i < runner.Config.TypeSpecificConfig.ConcurrentReadersAmount; i++ {
 		go runner.TestReader()
 	}
 }
@@ -148,7 +158,7 @@ func (runner *SimpleTestRunner) ReadersSupervisor() {
 	defer runner.WaitGroup.Done()
 
 	log.Println("Reading the output directory...")
-	outputFiles, err := ioutil.ReadDir(runner.Config.OutputData)
+	outputFiles, err := ioutil.ReadDir(runner.Config.GenericConfig.OutputData)
 	if err != nil {
 		log.Fatalf("Cannot read the output data direcory! Error: %v\n", err)
 	}
@@ -161,26 +171,26 @@ func (runner *SimpleTestRunner) ReadersSupervisor() {
 			continue
 		}
 
-		id := runner.Config.TestIdRegexpInternal.Find([]byte(output.Name()))
+		id := runner.Config.GenericConfig.TestIdRegexpInternal.Find([]byte(output.Name()))
 		if id == nil {
 			log.Printf("Invalid path: %s\n", output.Name())
 		}
-		idOutputMap[string(id)] = runner.Config.OutputData + string(os.PathSeparator) + output.Name()
+		idOutputMap[string(id)] = runner.Config.GenericConfig.OutputData + string(os.PathSeparator) + output.Name()
 	}
 
 	log.Println("Reading the input directory...")
-	inputFiles, err := ioutil.ReadDir(runner.Config.InputData)
+	inputFiles, err := ioutil.ReadDir(runner.Config.GenericConfig.InputData)
 	if err != nil {
 		log.Fatalf("Cannot read the input data direcory! Error: %v\n", err)
 	}
 
 	log.Println("Preparing the input files to be read...")
-	log.Printf("Skipping first %d tests...", runner.Config.SkipFirstN)
+	log.Printf("Skipping first %d tests...", runner.Config.GenericConfig.SkipFirstN)
 	for i, input := range inputFiles {
-		if i < int(runner.Config.SkipFirstN) {
+		if i < int(runner.Config.GenericConfig.SkipFirstN) {
 			continue
 		}
-		id := string(runner.Config.TestIdRegexpInternal.Find([]byte(input.Name())))
+		id := string(runner.Config.GenericConfig.TestIdRegexpInternal.Find([]byte(input.Name())))
 		outputPath, exists := idOutputMap[id]
 		if !exists {
 			log.Printf("Output file not found. Input path: %s\n", input.Name())
@@ -190,7 +200,7 @@ func (runner *SimpleTestRunner) ReadersSupervisor() {
 		runner.ReadRequests <- ReadRequest{
 			TestId: id,
 			TestLocation: TestLocation{
-				InputFilePath:  runner.Config.InputData + string(os.PathSeparator) + input.Name(),
+				InputFilePath:  runner.Config.GenericConfig.InputData + string(os.PathSeparator) + input.Name(),
 				OutputFilePath: outputPath,
 			},
 		}
@@ -226,8 +236,8 @@ func (runner *SimpleTestRunner) TestReader() {
 }
 
 func (runner *SimpleTestRunner) InitTestRunners() {
-	log.Printf("Running %d test runners...\n", runner.Config.ConcurrentRunnersAmount)
-	for i := uint(0); i < runner.Config.ConcurrentRunnersAmount; i++ {
+	log.Printf("Running %d test runners...\n", runner.Config.TypeSpecificConfig.ConcurrentRunnersAmount)
+	for i := uint(0); i < runner.Config.TypeSpecificConfig.ConcurrentRunnersAmount; i++ {
 		go runner.TestRunner()
 	}
 }
@@ -322,7 +332,7 @@ func (runner *SimpleTestRunner) RunTest(test *TestData) TestReport {
 		MaxMemory: 0,
 		ExitCode:  0,
 	}
-	cmd := exec.Command(runner.Config.SolutionPath)
+	cmd := exec.Command(runner.Config.GenericConfig.SolutionPath)
 	cmd.Stdin = bytes.NewReader(test.InputData)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
